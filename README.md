@@ -1,4 +1,4 @@
-# Insttalation Depencies
+# Installation Depencies
 ```bash
 $ pip install -r requirements
 ```
