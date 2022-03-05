@@ -26,18 +26,22 @@ class ttyd(websocket.WebSocketApp):
             on_close=self.on_close
         )
         self.credential = credential
-        signal(2, lambda x,y : self.send_ctrl('c'))
-        signal(20, lambda x,y : self.send_ctrl('z'))
-        th = Thread(target=self.send_keys)
-        th.start()
-        
+        self.connected = False
+
     def on_close(self, ws, code, msg):
         pass
 
     def on_message(self, ws, msg: bytes):
+        if not self.connected:
+            self.connected = True
+            signal(2, lambda x,y : self.send_ctrl('c'))
+            signal(20, lambda x,y : self.send_ctrl('z'))
+            th = Thread(target=self.send_keys)
+            th.start()
         if msg[0] == 48:
             stdout.write(msg[1:].decode())
             stdout.flush()
+
     def resize(self, d, x):
         self.send('1{"columns":%s,"rows":%s}'%get_terminal_size())
 
