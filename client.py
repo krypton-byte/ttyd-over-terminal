@@ -17,7 +17,8 @@ class ttyd(websocket.WebSocketApp):
     def __init__(
         self,
         url: str,
-        credential: Optional[str] = None
+        credential: Optional[str] = None,
+        cmd: str = ''
     ):
         super().__init__(
             url,
@@ -26,11 +27,12 @@ class ttyd(websocket.WebSocketApp):
             on_message=self.on_message,
             on_close=self.on_close
         )
+        self.cmd = cmd
         self.credential = credential
         self.connected = False
 
     def on_close(self, ws, code, msg):
-        term[3] = term[3] & (termios.ECHO | termios.ICANON)
+        term[3] &= (termios.ECHO | termios.ECHOCTL | termios.BRKINT)
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, term)
         self.connected = False
         pass
@@ -38,6 +40,8 @@ class ttyd(websocket.WebSocketApp):
     def on_message(self, ws, msg: bytes):
         if not self.connected:
             self.connected = True
+            if self.cmd:
+                self.send_command(self.cmd + '\n')
             signal(2, lambda x,y : self.send_ctrl('c'))
             signal(20, lambda x,y : self.send_ctrl('z'))
             th = Thread(target=self.send_keys)
@@ -52,7 +56,9 @@ class ttyd(websocket.WebSocketApp):
 
     def send_command(self, c: str):
         if not self.connected:
-            term[3] = term[3] & (termios.ECHO | termios.ICANON)
+            if self.cmd:
+                self.send_command(self.cmd + '\n')
+            term[3] &= (termios.ECHO | termios.ECHOCTL | termios.BRKINT)
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, term)
             sys.exit(0)
         self.send('0'+c)
@@ -84,6 +90,7 @@ class ttyd(websocket.WebSocketApp):
                 if not self.connected:
                     break
                 self.send_command(h)
+
     def on_open(self, ws):
         self.send('{"AuthToken":"%s"}' % (base64.b64encode(self.credential.encode()) if self.credential else b'').decode())
         signal(SIGWINCH, self.resize)
@@ -91,6 +98,7 @@ class ttyd(websocket.WebSocketApp):
 
 arg = argparse.ArgumentParser()
 arg.add_argument('--url', type=str, help='example --url=ws://example.com', required=True)
-arg.add_argument('--credential', type=str, help='example --credential="a:b"')
+arg.add_argument('--credential', type=str, help='example --credential="username:password"')
+arg.add_argument('-c', type=str, help='Send command', default='')
 parse = arg.parse_args()
-ttyd(parse.url, parse.credential).run_forever()
+ttyd(parse.url, parse.credential, parse.c).run_forever()
