@@ -13,6 +13,7 @@ import argparse
 import tty
 import select
 #websocket.enableTrace(True)
+
 class ttyd(websocket.WebSocketApp):
     def __init__(
         self,
@@ -59,7 +60,7 @@ class ttyd(websocket.WebSocketApp):
         if c:
             self.send(decode(c, 'hex'))
             
-    @contextlib.contextmanager
+
     def raw_mode(self, file):
         old_attrs = termios.tcgetattr(file.fileno())
         new_attrs = old_attrs[:]
@@ -72,18 +73,20 @@ class ttyd(websocket.WebSocketApp):
 
     def send_keys(self):
         tty.setcbreak(sys.stdin.fileno())
-        with self.raw_mode(sys.stdin):
-            while True:
-                if not self.connected:
-                    break
-                elif select.select([sys.stdin], [], [], 0)[0]:
-                    h = sys.stdin.read(1)
-                    self.send_command(h)
+        self.raw_mode(sys.stdin)
+        while True:
+            if not self.connected:
+                break
+            elif select.select([sys.stdin], [], [], 1)[0]:
+                h = sys.stdin.read(1)
+                print(h.__repr__())
+                self.send_command(h)
 
     def on_open(self, ws):
         self.send('{"AuthToken":"%s"}' % (base64.b64encode(self.credential.encode()) if self.credential else b'').decode())
         signal(SIGWINCH, self.resize)
         self.resize(*get_terminal_size())
+
 
 arg = argparse.ArgumentParser()
 arg.add_argument('--url', type=str, help='example --url=ws://example.com', required=True)
