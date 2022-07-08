@@ -11,6 +11,7 @@ import base64
 from typing import Optional
 import argparse
 import sys
+term =  termios.tcgetattr(sys.stdin.fileno())
 #websocket.enableTrace(True)
 class ttyd(websocket.WebSocketApp):
     def __init__(
@@ -29,6 +30,8 @@ class ttyd(websocket.WebSocketApp):
         self.connected = False
 
     def on_close(self, ws, code, msg):
+        term[3] = term[3] & (termios.ECHO | termios.ICANON)
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, term)
         self.connected = False
         pass
 
@@ -49,6 +52,8 @@ class ttyd(websocket.WebSocketApp):
 
     def send_command(self, c: str):
         if not self.connected:
+            term[3] = term[3] & (termios.ECHO | termios.ICANON)
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, term)
             sys.exit(0)
         self.send('0'+c)
 
