@@ -1,3 +1,4 @@
+from __future__ import annotations
 import websocket
 from sys import stdout
 from os import get_terminal_size
@@ -7,25 +8,58 @@ import termios
 import sys
 from codecs import decode
 from threading import Thread
+from requests import Session
 import base64
-from typing import Optional
+from typing import Callable, Optional
 import argparse
 import sys
-term = termios.tcgetattr(sys.stdin.fileno())
 from urllib.parse import quote
 
-class ttyd(websocket.WebSocketApp):
+term = termios.tcgetattr(sys.stdin.fileno())
+class InvalidAuthorization(Exception):
+    pass
 
+class WebPage(Session):
+    def __init__(self,url) -> None:
+        super().__init__()
+        self.url = url
+
+    def token(self, username: str, password: str):
+        b=base64.b64encode(f"{username}:{password}".encode()).decode()
+        self.headers['Authorization'] = f'Basic {b}'
+        bak = self.get(self.url+'/token')
+        if bak.status_code == 200:
+            return bak.json()['token']
+        raise InvalidAuthorization()
+
+    def check(self):
+        if self.get(self.url).status_code != 200:
+            raise InvalidAuthorization()
+
+def Auth(fu: Callable):
+    def arg(cls: ttyd, url: str, credential: Optional[str]=None, args: list=[], cmd: str=''):
+        page = WebPage('https://'+url[3:] if url.startswith('wss://') else 'http'+url[2:])
+        try:
+            page.check()
+            return fu(cls, url, None, args, cmd)
+        except InvalidAuthorization:
+            if credential:
+                return fu(cls, url, page.token(*credential.split(':')), args, cmd)
+            else:
+                raise InvalidAuthorization()
+    return arg
+class ttyd(websocket.WebSocketApp):
+    @Auth
     def __init__(self, url: str, credential: Optional[str]=None, args: list=[], cmd: str=''):
         super().__init__(
-            url+'?'+''.join([f'arg={quote(x)}' for x in args]),
-            header=['Sec-WebSocket-Protocol: tty'],
+            url+'/ws?'+''.join([f'arg={quote(x)}' for x in args]),
+            header=['Sec-WebSocket-Protocol: tty', f'Authorization: Basic {credential}'],
             on_open=self.on_open,
             on_message=self.on_message,
             on_close=self.on_close
         )
-        self.cmd = cmd
         self.credential = credential
+        self.cmd = cmd
         self.connected = False
         self.__connected = False
 
@@ -43,7 +77,7 @@ class ttyd(websocket.WebSocketApp):
             if self.cmd:
                 self.send_command(self.cmd + '\n')
             signal(SIGINT, lambda x, y: self.send_ctrl('c'))
-            signal(20, lambda x, y: self.send_ctrl('z'))
+            signal(SIGTSTP, lambda x, y: self.send_ctrl('z'))
             th = Thread(target=self.send_keys)
             th.daemon = True
             th.start()
@@ -58,7 +92,7 @@ class ttyd(websocket.WebSocketApp):
         if not self.connected:
             term[3] &= termios.ECHO | termios.ECHOCTL | termios.BRKINT
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, term)
-            sys.exit(0)
+            sys.exit(0 if self.__connected else 1)
         self.send('0' + c)
 
     def send_ctrl(self, q: str):
@@ -87,15 +121,15 @@ class ttyd(websocket.WebSocketApp):
                 self.send_command(h)
 
     def on_open(self, ws):
-        self.send('{"AuthToken":"%s"}' % (base64.b64encode(self.credential.encode()) if self.credential else b'').decode())
+        self.send('{"AuthToken":"%s"}' % (self.credential or ''))
         signal(SIGWINCH, self.resize)
         self.resize(*get_terminal_size())
 
-
-arg = argparse.ArgumentParser()
-arg.add_argument('--url', type=str, help='example --url=ws://example.com', required=True)
-arg.add_argument('--credential', type=str, help='example --credential="username:password"')
-arg.add_argument('args', metavar='ARGS', nargs='*', help='Arguments', default=[])
-arg.add_argument('-c', type=str, help='Send command', default='')
-parse = arg.parse_args()
-ttyd(parse.url, parse.credential, parse.args, parse.c).run_forever()
+if __name__ == '__main__':
+    arg = argparse.ArgumentParser()
+    arg.add_argument('--url', type=str, help='example --url=ws://example.com', required=True)
+    arg.add_argument('--credential', type=str, help='example --credential="username:password"')
+    arg.add_argument('args', metavar='ARGS', nargs='*', help='Arguments', default=[])
+    arg.add_argument('-c', type=str, help='Send command', default='')
+    parse = arg.parse_args()
+    ttyd(parse.url, parse.credential, parse.args, parse.c).run_forever()
