@@ -30,7 +30,7 @@ class WebPage(Session):
         bak = self.get(self.url+'/token')
         if bak.status_code == 200:
             return bak.json()['token']
-        raise InvalidAuthorization()
+        raise InvalidAuthorization('Credential Invalid')
 
     def check(self):
         if self.get(self.url).status_code != 200:
@@ -38,7 +38,7 @@ class WebPage(Session):
 
 def Auth(fu: Callable):
     def arg(cls: ttyd, url: str, credential: Optional[str]=None, args: list=[], cmd: str=''):
-        page = WebPage('https://'+url[3:] if url.startswith('wss://') else 'http'+url[2:])
+        page = WebPage(url)
         try:
             page.check()
             return fu(cls, url, None, args, cmd)
@@ -46,13 +46,13 @@ def Auth(fu: Callable):
             if credential:
                 return fu(cls, url, page.token(*credential.split(':')), args, cmd)
             else:
-                raise InvalidAuthorization()
+                raise InvalidAuthorization('Credential Required')
     return arg
 class ttyd(websocket.WebSocketApp):
     @Auth
     def __init__(self, url: str, credential: Optional[str]=None, args: list=[], cmd: str=''):
         super().__init__(
-            url+'/ws?'+''.join([f'arg={quote(x)}' for x in args]),
+            'ws'+url[4:]+'/ws?'+''.join([f'arg={quote(x)}' for x in args]),
             header=['Sec-WebSocket-Protocol: tty', f'Authorization: Basic {credential}'],
             on_open=self.on_open,
             on_message=self.on_message,
@@ -132,4 +132,8 @@ if __name__ == '__main__':
     arg.add_argument('args', metavar='ARGS', nargs='*', help='Arguments', default=[])
     arg.add_argument('-c', type=str, help='Send command', default='')
     parse = arg.parse_args()
-    ttyd(parse.url, parse.credential, parse.args, parse.c).run_forever()
+    try:
+        ttyd(parse.url, parse.credential, parse.args, parse.c).run_forever()
+    except InvalidAuthorization as e:
+        sys.stderr.write(f'[*] {e.__str__()}')
+        sys.stderr.flush()
