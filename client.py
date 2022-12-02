@@ -2,7 +2,12 @@ from __future__ import annotations
 import websocket
 from sys import stdout
 from os import get_terminal_size
-from signal import signal, SIGWINCH, SIGINT, SIGTSTP
+from signal import (
+    signal,
+    SIGWINCH,
+    SIGINT,
+    SIGTSTP
+)
 import contextlib
 import termios
 import sys
@@ -10,24 +15,31 @@ from codecs import decode
 from threading import Thread
 from requests import Session
 import base64
-from typing import Callable, Optional
+from typing import (
+    Callable,
+    Optional
+)
 import argparse
 import sys
 from urllib.parse import quote
 
 term = termios.tcgetattr(sys.stdin.fileno())
+
+
 class InvalidAuthorization(Exception):
     pass
 
+VERIFY = True
 class WebPage(Session):
-    def __init__(self,url) -> None:
+    def __init__(self, url: str, verify: bool) -> None:
         super().__init__()
+        self.verify: bool = verify
         self.url = url
 
     def token(self, username: str, password: str):
         b=base64.b64encode(f"{username}:{password}".encode()).decode()
         self.headers['Authorization'] = f'Basic {b}'
-        bak = self.get(self.url+'/token')
+        bak = self.get(self.url+'/token', verify=self.verify)
         if bak.status_code == 200:
             return bak.json()['token']
         raise InvalidAuthorization('Credential Invalid')
@@ -38,7 +50,8 @@ class WebPage(Session):
 
 def Auth(fu: Callable):
     def arg(cls: ttyd, url: str, credential: Optional[str]=None, args: list=[], cmd: str=''):
-        page = WebPage(url)
+        print('VER, ', VERIFY)
+        page = WebPage(url, VERIFY)
         try:
             page.check()
             return fu(cls, url, None, args, cmd)
@@ -48,6 +61,7 @@ def Auth(fu: Callable):
             else:
                 raise InvalidAuthorization('Credential Required')
     return arg
+
 class ttyd(websocket.WebSocketApp):
     @Auth
     def __init__(self, url: str, credential: Optional[str]=None, args: list=[], cmd: str=''):
@@ -76,8 +90,6 @@ class ttyd(websocket.WebSocketApp):
             self.__connected = True
             if self.cmd:
                 self.send_command(self.cmd + '\n')
-            signal(SIGINT, lambda x, y: self.send_ctrl('c'))
-            signal(SIGTSTP, lambda x, y: self.send_ctrl('z'))
             th = Thread(target=self.send_keys)
             th.daemon = True
             th.start()
@@ -93,13 +105,7 @@ class ttyd(websocket.WebSocketApp):
             term[3] &= termios.ECHO | termios.ECHOCTL | termios.BRKINT
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, term)
             sys.exit(0 if self.__connected else 1)
-        self.send('0' + c)
-
-    def send_ctrl(self, q: str):
-        code = {'c': '3003', 'z': '301a'}
-        c = code.get(q.lower())
-        if c:
-            self.send(decode(c, 'hex'))
+        self.send('0' + ('\r' if c == '\n' else c))
 
     @contextlib.contextmanager
     def raw_mode(self, file):
@@ -128,11 +134,14 @@ class ttyd(websocket.WebSocketApp):
 if __name__ == '__main__':
     arg = argparse.ArgumentParser()
     arg.add_argument('--url', type=str, help='example --url=ws://example.com', required=True)
+    arg.add_argument('--no-verify', action='store_true')
     arg.add_argument('--credential', type=str, help='example --credential="username:password"')
     arg.add_argument('args', metavar='ARGS', nargs='*', help='Arguments', default=[])
     arg.add_argument('-c', type=str, help='Send command', default='')
     parse = arg.parse_args()
     try:
+        VERIFY = not parse.no_verify
+        print('verify ', VERIFY)
         ttyd(parse.url, parse.credential, parse.args, parse.c).run_forever()
     except InvalidAuthorization as e:
         sys.stderr.write(f'[*] {e.__str__()}')
