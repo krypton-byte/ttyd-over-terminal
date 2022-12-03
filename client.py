@@ -50,7 +50,6 @@ class WebPage(Session):
 
 def Auth(fu: Callable):
     def arg(cls: ttyd, url: str, credential: Optional[str]=None, args: list=[], cmd: str=''):
-        print('VER, ', VERIFY)
         page = WebPage(url, VERIFY)
         try:
             page.check()
@@ -141,7 +140,6 @@ if __name__ == '__main__':
     parse = arg.parse_args()
     try:
         VERIFY = not parse.no_verify
-        print('verify ', VERIFY)
         ttyd(parse.url, parse.credential, parse.args, parse.c).run_forever()
     except InvalidAuthorization as e:
         sys.stderr.write(f'[*] {e.__str__()}')
